@@ -1,0 +1,8 @@
+{
+  "name": "SayurSegar",
+  "description": "Website e-commerce sederhana untuk menjual sayuran segar dengan dashboard admin dan antarmuka pembeli, dibuat menggunakan state management lokal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
