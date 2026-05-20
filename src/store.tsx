@@ -166,8 +166,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (cart.length === 0) return;
     
     try {
-      const batch = writeBatch(db);
+      const newOrderId = `ORD-${Date.now().toString().slice(-6)}`;
+      const newOrder: any = {
+        id: newOrderId,
+        buyerName,
+        items: cart,
+        total: cart.reduce((sum, item) => sum + item.price * item.cartQuantity, 0),
+        deliveryMethod,
+        status: 'pending',
+        date: new Date().toLocaleString('id-ID'),
+      };
       
+      if (deliveryDetails && deliveryMethod === 'delivery') {
+        newOrder.deliveryDetails = deliveryDetails;
+      }
+
+      // Sanitize undefined fields which Firestore hates
+      const sanitizedOrder = JSON.parse(JSON.stringify(newOrder));
+      
+      const batch = writeBatch(db);
+      const orderRef = doc(db, 'orders', newOrderId);
+      batch.set(orderRef, sanitizedOrder);
+
       // Decrease stock in Firestore
       for (const item of cart) {
         const pRef = doc(db, 'products', item.id);
@@ -176,25 +196,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           batch.update(pRef, { stock: Math.max(0, product.stock - item.cartQuantity) });
         }
       }
-
-      const total = cart.reduce((sum, item) => sum + item.price * item.cartQuantity, 0);
-      const newOrderId = `ORD-${Date.now().toString().slice(-6)}`;
-      const newOrder: any = {
-        id: newOrderId,
-        buyerName,
-        items: cart,
-        total,
-        deliveryMethod,
-        status: 'pending',
-        date: new Date().toLocaleString('id-ID'),
-      };
-      
-      if (deliveryDetails) {
-        newOrder.deliveryDetails = deliveryDetails;
-      }
-
-      const orderRef = doc(db, 'orders', newOrderId);
-      batch.set(orderRef, newOrder);
 
       await batch.commit();
       clearCart();
