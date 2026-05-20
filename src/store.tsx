@@ -41,23 +41,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   useEffect(() => {
-    const unsubscribeProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
-      const productsData: Product[] = [];
-      snapshot.forEach((doc) => {
-        productsData.push({ id: doc.id, ...doc.data() } as Product);
-      });
-      setProducts(productsData);
-    });
+    const unsubscribeProducts = onSnapshot(collection(db, 'products'), 
+      (snapshot) => {
+        const productsData: Product[] = [];
+        snapshot.forEach((doc) => {
+          productsData.push({ id: doc.id, ...doc.data() } as Product);
+        });
+        setProducts(productsData);
+      },
+      (error) => {
+        console.error("Error fetching products:", error);
+      }
+    );
 
-    const unsubscribeOrders = onSnapshot(collection(db, 'orders'), (snapshot) => {
-      const ordersData: Order[] = [];
-      snapshot.forEach((doc) => {
-        ordersData.push({ id: doc.id, ...doc.data() } as Order);
-      });
-      // Sort by date descending (newest first)
-      ordersData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setOrders(ordersData);
-    });
+    const unsubscribeOrders = onSnapshot(collection(db, 'orders'), 
+      (snapshot) => {
+        const ordersData: Order[] = [];
+        snapshot.forEach((doc) => {
+          ordersData.push({ id: doc.id, ...doc.data() } as Order);
+        });
+        // Sort by date descending (newest first)
+        ordersData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setOrders(ordersData);
+      },
+      (error) => {
+        console.error("Error fetching orders:", error);
+      }
+    );
 
     return () => {
       unsubscribeProducts();
