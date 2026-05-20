@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { Product, CartItem, Order, ChatMessage, ToastMessage } from './types';
 import { db } from './firebase';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, writeBatch } from 'firebase/firestore';
 
 interface AppContextType {
   products: Product[];
@@ -165,33 +165,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const createOrder = async (buyerName: string, deliveryMethod: 'pickup' | 'delivery', deliveryDetails?: { phone: string, address: string, notes: string }) => {
     if (cart.length === 0) return;
     
-    // Decrease stock in Firestore
-    for (const item of cart) {
-      try {
+    try {
+      const batch = writeBatch(db);
+      
+      // Decrease stock in Firestore
+      for (const item of cart) {
         const pRef = doc(db, 'products', item.id);
         const product = products.find(p => p.id === item.id);
         if (product) {
-          await updateDoc(pRef, { stock: Math.max(0, product.stock - item.cartQuantity) });
+          batch.update(pRef, { stock: Math.max(0, product.stock - item.cartQuantity) });
         }
-      } catch (error) {
-        console.error('Failed to update stock for', item.id, error);
       }
-    }
 
-    const total = cart.reduce((sum, item) => sum + item.price * item.cartQuantity, 0);
-    const newOrder: Order = {
-      id: `ORD-${Date.now().toString().slice(-6)}`,
-      buyerName,
-      items: cart,
-      total,
-      deliveryMethod,
-      deliveryDetails,
-      status: 'pending',
-      date: new Date().toLocaleString('id-ID'),
-    };
+      const total = cart.reduce((sum, item) => sum + item.price * item.cartQuantity, 0);
+      const newOrderId = `ORD-${Date.now().toString().slice(-6)}`;
+      const newOrder: any = {
+        id: newOrderId,
+        buyerName,
+        items: cart,
+        total,
+        deliveryMethod,
+        status: 'pending',
+        date: new Date().toLocaleString('id-ID'),
+      };
+      
+      if (deliveryDetails) {
+        newOrder.deliveryDetails = deliveryDetails;
+      }
 
-    try {
-      await setDoc(doc(db, 'orders', newOrder.id), newOrder);
+      const orderRef = doc(db, 'orders', newOrderId);
+      batch.set(orderRef, newOrder);
+
+      await batch.commit();
       clearCart();
       addToast('Pesanan berhasil dibuat!', 'success');
     } catch (error) {
