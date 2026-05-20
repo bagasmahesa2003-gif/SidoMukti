@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { Product, CartItem, Order, ChatMessage, ToastMessage } from './types';
 import { db } from './firebase';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 
 interface AppContextType {
   products: Product[];
@@ -41,7 +41,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'products'), (snapshot) => {
+    const unsubscribeProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
       const productsData: Product[] = [];
       snapshot.forEach((doc) => {
         productsData.push({ id: doc.id, ...doc.data() } as Product);
@@ -49,7 +49,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setProducts(productsData);
     });
 
-    return () => unsubscribe();
+    const unsubscribeOrders = onSnapshot(collection(db, 'orders'), (snapshot) => {
+      const ordersData: Order[] = [];
+      snapshot.forEach((doc) => {
+        ordersData.push({ id: doc.id, ...doc.data() } as Order);
+      });
+      // Sort by date descending (newest first)
+      ordersData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setOrders(ordersData);
+    });
+
+    return () => {
+      unsubscribeProducts();
+      unsubscribeOrders();
+    };
   }, []);
 
   // Helpers
@@ -167,14 +180,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       date: new Date().toLocaleString('id-ID'),
     };
 
-    setOrders((prev) => [newOrder, ...prev]);
-    clearCart();
-    addToast('Pesanan berhasil dibuat!', 'success');
+    try {
+      await setDoc(doc(db, 'orders', newOrder.id), newOrder);
+      clearCart();
+      addToast('Pesanan berhasil dibuat!', 'success');
+    } catch (error) {
+      console.error('Failed to create order', error);
+      addToast('Gagal membuat pesanan', 'error');
+    }
   };
 
-  const updateOrderStatus = (id: string, status: Order['status']) => {
-    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status } : o)));
-    addToast(`Status pesanan diperbarui`, 'success');
+  const updateOrderStatus = async (id: string, status: Order['status']) => {
+    try {
+      await updateDoc(doc(db, 'orders', id), { status });
+      addToast(`Status pesanan diperbarui`, 'success');
+    } catch (error) {
+      console.error('Failed to update order status', error);
+      addToast('Gagal memperbarui status pesanan', 'error');
+    }
   };
 
   // Chat Actions
