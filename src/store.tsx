@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { Product, CartItem, Order, ChatMessage, ToastMessage } from './types';
-import { initialProducts } from './data';
+import { db } from './firebase';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 
 interface AppContextType {
   products: Product[];
@@ -33,11 +34,23 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [view, setView] = useState<'buyer' | 'admin'>('buyer');
-  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'products'), (snapshot) => {
+      const productsData: Product[] = [];
+      snapshot.forEach((doc) => {
+        productsData.push({ id: doc.id, ...doc.data() } as Product);
+      });
+      setProducts(productsData);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   // Helpers
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -51,20 +64,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   // Product Actions
-  const addProduct = (p: Omit<Product, 'id'>) => {
-    const newProduct = { ...p, id: Date.now().toString() };
-    setProducts((prev) => [...prev, newProduct]);
-    addToast('Produk ditambahkan', 'success');
+  const addProduct = async (p: Omit<Product, 'id'>) => {
+    try {
+      await addDoc(collection(db, 'products'), p);
+      addToast('Produk ditambahkan', 'success');
+    } catch (error) {
+      addToast('Gagal menambahkan produk', 'error');
+    }
   };
 
-  const updateProduct = (updated: Product) => {
-    setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-    addToast('Produk diperbarui', 'success');
+  const updateProduct = async (updated: Product) => {
+    try {
+      const { id, ...data } = updated;
+      await updateDoc(doc(db, 'products', id), data);
+      addToast('Produk diperbarui', 'success');
+    } catch (error) {
+      addToast('Gagal memperbarui produk', 'error');
+    }
   };
 
-  const deleteProduct = (id: string) => {
-    setProducts((prev) => prev.filter((p) => p.id !== id));
-    addToast('Produk dihapus', 'success');
+  const deleteProduct = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'products', id));
+      addToast('Produk dihapus', 'success');
+    } catch (error) {
+      addToast('Gagal menghapus produk', 'error');
+    }
   };
 
   // Cart Actions
@@ -114,19 +139,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const clearCart = () => setCart([]);
 
   // Order Actions
-  const createOrder = (buyerName: string, deliveryMethod: 'pickup' | 'delivery', deliveryDetails?: { phone: string, address: string, notes: string }) => {
+  const createOrder = async (buyerName: string, deliveryMethod: 'pickup' | 'delivery', deliveryDetails?: { phone: string, address: string, notes: string }) => {
     if (cart.length === 0) return;
     
-    // Decrease stock
-    setProducts((prev) => 
-      prev.map((p) => {
-        const cartItem = cart.find((c) => c.id === p.id);
-        if (cartItem) {
-          return { ...p, stock: p.stock - cartItem.cartQuantity };
+    // Decrease stock in Firestore
+    for (const item of cart) {
+      try {
+        const pRef = doc(db, 'products', item.id);
+        const product = products.find(p => p.id === item.id);
+        if (product) {
+          await updateDoc(pRef, { stock: Math.max(0, product.stock - item.cartQuantity) });
         }
-        return p;
-      })
-    );
+      } catch (error) {
+        console.error('Failed to update stock for', item.id, error);
+      }
+    }
 
     const total = cart.reduce((sum, item) => sum + item.price * item.cartQuantity, 0);
     const newOrder: Order = {
