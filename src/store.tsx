@@ -1,6 +1,11 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { Product, CartItem, Order, ChatMessage, ToastMessage } from './types';
-import { db } from './firebase';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  ReactNode,
+} from 'react';
+
 import {
   collection,
   onSnapshot,
@@ -11,6 +16,15 @@ import {
   runTransaction,
 } from 'firebase/firestore';
 
+import { Product, CartItem, Order, ChatMessage, ToastMessage } from './types';
+import { db } from './firebase';
+
+interface DeliveryDetails {
+  phone: string;
+  address: string;
+  notes: string;
+}
+
 interface AppContextType {
   products: Product[];
   cart: CartItem[];
@@ -19,26 +33,35 @@ interface AppContextType {
   toasts: ToastMessage[];
   view: 'buyer' | 'admin';
   setView: (view: 'buyer' | 'admin') => void;
+
   // Product actions
-  addProduct: (product: Omit<Product, 'id'>) => void;
-  updateProduct: (product: Product) => void;
-  deleteProduct: (id: string) => void;
+  addProduct: (product: Omit<Product, 'id'>) => Promise<void>;
+  updateProduct: (product: Product) => Promise<void>;
+  deleteProduct: (id: string) => Promise<void>;
+
   // Cart actions
   addToCart: (product: Product) => void;
   updateCartQty: (id: string, delta: number) => void;
   removeFromCart: (id: string) => void;
   clearCart: () => void;
+
   // Order actions
   createOrder: (
-  buyerName: string,
-  deliveryMethod: 'pickup' | 'delivery',
-  deliveryDetails?: { phone: string; address: string; notes: string }
-) => Promise<boolean>;
-  updateOrderStatus: (id: string, status: Order['status']) => void;
+    buyerName: string,
+    deliveryMethod: 'pickup' | 'delivery',
+    deliveryDetails?: DeliveryDetails
+  ) => Promise<boolean>;
+
+  updateOrderStatus: (id: string, status: Order['status']) => Promise<void>;
+
   // Chat actions
   sendMessage: (text: string, sender: 'buyer' | 'admin') => void;
+
   // Toast actions
-  addToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  addToast: (
+    message: string,
+    type?: 'success' | 'error' | 'info'
+  ) => void;
   removeToast: (id: string) => void;
 }
 
@@ -53,31 +76,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   useEffect(() => {
-    const unsubscribeProducts = onSnapshot(collection(db, 'products'), 
+    const unsubscribeProducts = onSnapshot(
+      collection(db, 'products'),
       (snapshot) => {
         const productsData: Product[] = [];
-        snapshot.forEach((doc) => {
-          productsData.push({ id: doc.id, ...doc.data() } as Product);
+
+        snapshot.forEach((productDoc) => {
+          productsData.push({
+            id: productDoc.id,
+            ...productDoc.data(),
+          } as Product);
         });
+
         setProducts(productsData);
       },
       (error) => {
-        console.error("Error fetching products:", error);
+        console.error('Error fetching products:', error);
       }
     );
 
-    const unsubscribeOrders = onSnapshot(collection(db, 'orders'), 
+    const unsubscribeOrders = onSnapshot(
+      collection(db, 'orders'),
       (snapshot) => {
         const ordersData: Order[] = [];
-        snapshot.forEach((doc) => {
-          ordersData.push({ id: doc.id, ...doc.data() } as Order);
+
+        snapshot.forEach((orderDoc) => {
+          ordersData.push({
+            id: orderDoc.id,
+            ...orderDoc.data(),
+          } as Order);
         });
-        // Sort by date descending (newest first)
-        ordersData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        ordersData.sort((a, b) => {
+          return new Date(b.date).getTime() - new Date(a.date).getTime();
+        });
+
         setOrders(ordersData);
       },
       (error) => {
-        console.error("Error fetching orders:", error);
+        console.error('Error fetching orders:', error);
       }
     );
 
@@ -87,33 +124,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Helpers
-  const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    const id = Date.now().toString() + Math.random().toString(36).substring(2);
-    setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => removeToast(id), 3000);
+  // Toast Actions
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
-  const removeToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+  const addToast = (
+    message: string,
+    type: 'success' | 'error' | 'info' = 'info'
+  ) => {
+    const id =
+      Date.now().toString() + Math.random().toString(36).substring(2);
+
+    setToasts((prev) => [
+      ...prev,
+      {
+        id,
+        message,
+        type,
+      },
+    ]);
+
+    setTimeout(() => {
+      removeToast(id);
+    }, 3000);
   };
 
   // Product Actions
-  const addProduct = async (p: Omit<Product, 'id'>) => {
+  const addProduct = async (product: Omit<Product, 'id'>) => {
     try {
-      await addDoc(collection(db, 'products'), p);
+      await addDoc(collection(db, 'products'), product);
       addToast('Produk ditambahkan', 'success');
     } catch (error) {
+      console.error('Failed to add product:', error);
       addToast('Gagal menambahkan produk', 'error');
     }
   };
 
-  const updateProduct = async (updated: Product) => {
+  const updateProduct = async (updatedProduct: Product) => {
     try {
-      const { id, ...data } = updated;
-      await updateDoc(doc(db, 'products', id), data);
+      const { id, ...productData } = updatedProduct;
+
+      await updateDoc(doc(db, 'products', id), productData);
+
       addToast('Produk diperbarui', 'success');
     } catch (error) {
+      console.error('Failed to update product:', error);
       addToast('Gagal memperbarui produk', 'error');
     }
   };
@@ -123,161 +179,205 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await deleteDoc(doc(db, 'products', id));
       addToast('Produk dihapus', 'success');
     } catch (error) {
+      console.error('Failed to delete product:', error);
       addToast('Gagal menghapus produk', 'error');
     }
   };
 
   // Cart Actions
-const addToCart = (product: Product) => {
-  if (product.stock <= 0) {
-    addToast('Stok habis!', 'error');
-    return;
-  }
-
-  const existing = cart.find((item) => item.id === product.id);
-
-  if (existing) {
-    if (existing.cartQuantity >= product.stock) {
-      addToast('Tidak bisa melebihi stok!', 'error');
+  const addToCart = (product: Product) => {
+    if (product.stock <= 0) {
+      addToast('Stok habis!', 'error');
       return;
     }
 
-    setCart(
-      cart.map((item) =>
+    const existingItem = cart.find((item) => item.id === product.id);
+
+    if (existingItem) {
+      if (existingItem.cartQuantity >= product.stock) {
+        addToast('Tidak bisa melebihi stok!', 'error');
+        return;
+      }
+
+      const updatedCart = cart.map((item) =>
         item.id === product.id
-          ? { ...item, cartQuantity: item.cartQuantity + 1 }
+          ? {
+              ...item,
+              cartQuantity: item.cartQuantity + 1,
+            }
           : item
-      )
-    );
+      );
 
-    addToast('Jumlah ditambah di keranjang', 'success');
-    return;
-  }
+      setCart(updatedCart);
+      addToast('Jumlah ditambah di keranjang', 'success');
+      return;
+    }
 
-  setCart([...cart, { ...product, cartQuantity: 1 }]);
-  addToast('Masuk keranjang!', 'success');
-};
+    setCart([
+      ...cart,
+      {
+        ...product,
+        cartQuantity: 1,
+      },
+    ]);
+
+    addToast('Masuk keranjang!', 'success');
+  };
 
   const updateCartQty = (id: string, delta: number) => {
-  const item = cart.find((item) => item.id === id);
+    const selectedItem = cart.find((item) => item.id === id);
 
-  if (!item) return;
+    if (!selectedItem) return;
 
-  const newQty = item.cartQuantity + delta;
+    const newQty = selectedItem.cartQuantity + delta;
 
-  if (newQty > item.stock) {
-    addToast('Maksimal stok tercapai', 'error');
-    return;
-  }
+    if (newQty > selectedItem.stock) {
+      addToast('Maksimal stok tercapai', 'error');
+      return;
+    }
 
-  if (newQty < 1) return;
+    if (newQty < 1) return;
 
-  setCart(
-    cart.map((item) =>
+    const updatedCart = cart.map((item) =>
       item.id === id
-        ? { ...item, cartQuantity: newQty }
+        ? {
+            ...item,
+            cartQuantity: newQty,
+          }
         : item
-    )
-  );
-};
+    );
+
+    setCart(updatedCart);
+  };
 
   const removeFromCart = (id: string) => {
     setCart((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const clearCart = () => setCart([]);
+  const clearCart = () => {
+    setCart([]);
+  };
 
   // Order Actions
-const createOrder = async (
-  buyerName: string,
-  deliveryMethod: 'pickup' | 'delivery',
-  deliveryDetails?: { phone: string; address: string; notes: string }
-): Promise<boolean> => {
-  if (cart.length === 0) {
-    addToast('Keranjang masih kosong', 'error');
-    return false;
-  }
+  const createOrder = async (
+    buyerName: string,
+    deliveryMethod: 'pickup' | 'delivery',
+    deliveryDetails?: DeliveryDetails
+  ): Promise<boolean> => {
+    if (cart.length === 0) {
+      addToast('Keranjang masih kosong', 'error');
+      return false;
+    }
 
-  try {
-    const orderRef = doc(collection(db, 'orders'));
-    const newOrderId = orderRef.id;
+    if (!buyerName.trim()) {
+      addToast('Nama pembeli wajib diisi', 'error');
+      return false;
+    }
 
-    const cleanItems = cart.map((item) => ({
-      id: item.id,
-      name: item.name,
-      price: Number(item.price) || 0,
-      image: item.image || '',
-      stock: Number(item.stock) || 0,
-      cartQuantity: Number(item.cartQuantity) || 1,
-    }));
+    if (
+      deliveryMethod === 'delivery' &&
+      (!deliveryDetails?.phone.trim() || !deliveryDetails?.address.trim())
+    ) {
+      addToast('Nomor HP dan alamat wajib diisi', 'error');
+      return false;
+    }
 
-    const newOrder = {
-      id: newOrderId,
-      buyerName: buyerName.trim(),
-      items: cleanItems,
-      total: cleanItems.reduce(
-        (sum, item) => sum + item.price * item.cartQuantity,
-        0
-      ),
-      deliveryMethod,
-      ...(deliveryMethod === 'delivery' && deliveryDetails
-        ? {
-            deliveryDetails: {
-              phone: deliveryDetails.phone.trim(),
-              address: deliveryDetails.address.trim(),
-              notes: deliveryDetails.notes?.trim() || '',
-            },
+    try {
+      const newOrderId = `ORD-${Date.now().toString().slice(-6)}`;
+      const orderRef = doc(db, 'orders', newOrderId);
+
+      const cleanItems: CartItem[] = cart.map((item) => ({
+        id: item.id,
+        name: item.name,
+        price: Number(item.price) || 0,
+        image: item.image || '',
+        stock: Number(item.stock) || 0,
+        cartQuantity: Number(item.cartQuantity) || 1,
+      }));
+
+      const total = cleanItems.reduce((sum, item) => {
+        return sum + item.price * item.cartQuantity;
+      }, 0);
+
+      const newOrder: Order = {
+        id: newOrderId,
+        buyerName: buyerName.trim(),
+        items: cleanItems,
+        total,
+        deliveryMethod,
+        status: 'pending',
+        date: new Date().toLocaleString('id-ID'),
+        ...(deliveryMethod === 'delivery' && deliveryDetails
+          ? {
+              deliveryDetails: {
+                phone: deliveryDetails.phone.trim(),
+                address: deliveryDetails.address.trim(),
+                notes: deliveryDetails.notes?.trim() || '',
+              },
+            }
+          : {}),
+      };
+
+      await runTransaction(db, async (transaction) => {
+        const productSnapshots = await Promise.all(
+          cleanItems.map(async (item) => {
+            const productRef = doc(db, 'products', item.id);
+            const productSnap = await transaction.get(productRef);
+
+            return {
+              item,
+              productRef,
+              productSnap,
+            };
+          })
+        );
+
+        for (const { item, productSnap } of productSnapshots) {
+          if (!productSnap.exists()) {
+            throw new Error(`Produk "${item.name}" tidak ditemukan.`);
           }
-        : {}),
-      status: 'pending' as const,
-      date: new Date().toLocaleString('id-ID'),
-    };
 
-    await runTransaction(db, async (transaction) => {
-      for (const item of cleanItems) {
-        const productRef = doc(db, 'products', item.id);
-        const productSnap = await transaction.get(productRef);
+          const currentStock = Number(productSnap.data().stock) || 0;
 
-        if (!productSnap.exists()) {
-          throw new Error(`Produk "${item.name}" tidak ditemukan.`);
+          if (currentStock < item.cartQuantity) {
+            throw new Error(`Stok "${item.name}" tidak cukup.`);
+          }
         }
 
-        const currentStock = Number(productSnap.data().stock) || 0;
+        for (const { item, productRef, productSnap } of productSnapshots) {
+          const currentStock = Number(productSnap.data().stock) || 0;
 
-        if (currentStock < item.cartQuantity) {
-          throw new Error(`Stok "${item.name}" tidak cukup.`);
+          transaction.update(productRef, {
+            stock: currentStock - item.cartQuantity,
+          });
         }
 
-        transaction.update(productRef, {
-          stock: currentStock - item.cartQuantity,
-        });
-      }
+        transaction.set(orderRef, newOrder);
+      });
 
-      transaction.set(orderRef, newOrder);
-    });
+      clearCart();
+      addToast('Pesanan berhasil dibuat!', 'success');
+      return true;
+    } catch (error) {
+      console.error('Failed to create order:', error);
 
-    clearCart();
-    addToast('Pesanan berhasil dibuat!', 'success');
-    return true;
-  } catch (error) {
-    console.error('Failed to create order:', error);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Gagal membuat pesanan';
 
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Gagal membuat pesanan';
-
-    addToast(message || 'Gagal membuat pesanan', 'error');
-    return false;
-  }
-};
+      addToast(errorMessage || 'Gagal membuat pesanan', 'error');
+      return false;
+    }
+  };
 
   const updateOrderStatus = async (id: string, status: Order['status']) => {
     try {
-      await updateDoc(doc(db, 'orders', id), { status });
-      addToast(`Status pesanan diperbarui`, 'success');
+      await updateDoc(doc(db, 'orders', id), {
+        status,
+      });
+
+      addToast('Status pesanan diperbarui', 'success');
     } catch (error) {
-      console.error('Failed to update order status', error);
+      console.error('Failed to update order status:', error);
       addToast('Gagal memperbarui status pesanan', 'error');
     }
   };
@@ -285,30 +385,55 @@ const createOrder = async (
   // Chat Actions
   const sendMessage = (text: string, sender: 'buyer' | 'admin') => {
     if (!text.trim()) return;
+
     const newMessage: ChatMessage = {
       id: Date.now().toString(),
       text,
       sender,
-      timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
     };
+
     setMessages((prev) => [...prev, newMessage]);
   };
 
-  const value = {
-    products, cart, orders, messages, toasts, view, setView,
-    addProduct, updateProduct, deleteProduct,
-    addToCart, updateCartQty, removeFromCart, clearCart,
-    createOrder, updateOrderStatus,
-    sendMessage, addToast, removeToast
+  const value: AppContextType = {
+    products,
+    cart,
+    orders,
+    messages,
+    toasts,
+    view,
+    setView,
+    addProduct,
+    updateProduct,
+    deleteProduct,
+    addToCart,
+    updateCartQty,
+    removeFromCart,
+    clearCart,
+    createOrder,
+    updateOrderStatus,
+    sendMessage,
+    addToast,
+    removeToast,
   };
 
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+  return (
+    <AppContext.Provider value={value}>
+      {children}
+    </AppContext.Provider>
+  );
 }
 
 export function useAppStore() {
   const context = useContext(AppContext);
+
   if (context === undefined) {
     throw new Error('useAppStore must be used within an AppProvider');
   }
+
   return context;
 }
