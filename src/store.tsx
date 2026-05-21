@@ -1,7 +1,15 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { Product, CartItem, Order, ChatMessage, ToastMessage } from './types';
 import { db } from './firebase';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, writeBatch } from 'firebase/firestore';
+import {
+  collection,
+  onSnapshot,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  runTransaction,
+} from 'firebase/firestore';
 
 interface AppContextType {
   products: Product[];
@@ -21,7 +29,11 @@ interface AppContextType {
   removeFromCart: (id: string) => void;
   clearCart: () => void;
   // Order actions
-  createOrder: (buyerName: string, deliveryMethod: 'pickup' | 'delivery', deliveryDetails?: { phone: string, address: string, notes: string }) => void;
+  createOrder: (
+  buyerName: string,
+  deliveryMethod: 'pickup' | 'delivery',
+  deliveryDetails?: { phone: string; address: string; notes: string }
+) => Promise<boolean>;
   updateOrderStatus: (id: string, status: Order['status']) => void;
   // Chat actions
   sendMessage: (text: string, sender: 'buyer' | 'admin') => void;
@@ -176,49 +188,89 @@ const addToCart = (product: Product) => {
   const clearCart = () => setCart([]);
 
   // Order Actions
-  const createOrder = async (buyerName: string, deliveryMethod: 'pickup' | 'delivery', deliveryDetails?: { phone: string, address: string, notes: string }) => {
-    if (cart.length === 0) return;
-    
-    try {
-      const newOrderId = `ORD-${Date.now().toString().slice(-6)}`;
-      const newOrder: any = {
-        id: newOrderId,
-        buyerName,
-        items: cart,
-        total: cart.reduce((sum, item) => sum + item.price * item.cartQuantity, 0),
-        deliveryMethod,
-        status: 'pending',
-        date: new Date().toLocaleString('id-ID'),
-      };
-      
-      if (deliveryDetails && deliveryMethod === 'delivery') {
-        newOrder.deliveryDetails = deliveryDetails;
-      }
+const createOrder = async (
+  buyerName: string,
+  deliveryMethod: 'pickup' | 'delivery',
+  deliveryDetails?: { phone: string; address: string; notes: string }
+): Promise<boolean> => {
+  if (cart.length === 0) {
+    addToast('Keranjang masih kosong', 'error');
+    return false;
+  }
 
-      // Sanitize undefined fields which Firestore hates
-      const sanitizedOrder = JSON.parse(JSON.stringify(newOrder));
-      
-      const batch = writeBatch(db);
-      const orderRef = doc(db, 'orders', newOrderId);
-      batch.set(orderRef, sanitizedOrder);
+  try {
+    const orderRef = doc(collection(db, 'orders'));
+    const newOrderId = orderRef.id;
 
-      // Decrease stock in Firestore
-      for (const item of cart) {
-        const pRef = doc(db, 'products', item.id);
-        const product = products.find(p => p.id === item.id);
-        if (product) {
-          batch.update(pRef, { stock: Math.max(0, product.stock - item.cartQuantity) });
+    const cleanItems = cart.map((item) => ({
+      id: item.id,
+      name: item.name,
+      price: Number(item.price) || 0,
+      image: item.image || '',
+      stock: Number(item.stock) || 0,
+      cartQuantity: Number(item.cartQuantity) || 1,
+    }));
+
+    const newOrder = {
+      id: newOrderId,
+      buyerName: buyerName.trim(),
+      items: cleanItems,
+      total: cleanItems.reduce(
+        (sum, item) => sum + item.price * item.cartQuantity,
+        0
+      ),
+      deliveryMethod,
+      ...(deliveryMethod === 'delivery' && deliveryDetails
+        ? {
+            deliveryDetails: {
+              phone: deliveryDetails.phone.trim(),
+              address: deliveryDetails.address.trim(),
+              notes: deliveryDetails.notes?.trim() || '',
+            },
+          }
+        : {}),
+      status: 'pending' as const,
+      date: new Date().toLocaleString('id-ID'),
+    };
+
+    await runTransaction(db, async (transaction) => {
+      for (const item of cleanItems) {
+        const productRef = doc(db, 'products', item.id);
+        const productSnap = await transaction.get(productRef);
+
+        if (!productSnap.exists()) {
+          throw new Error(`Produk "${item.name}" tidak ditemukan.`);
         }
+
+        const currentStock = Number(productSnap.data().stock) || 0;
+
+        if (currentStock < item.cartQuantity) {
+          throw new Error(`Stok "${item.name}" tidak cukup.`);
+        }
+
+        transaction.update(productRef, {
+          stock: currentStock - item.cartQuantity,
+        });
       }
 
-      await batch.commit();
-      clearCart();
-      addToast('Pesanan berhasil dibuat!', 'success');
-    } catch (error) {
-      console.error('Failed to create order', error);
-      addToast('Gagal membuat pesanan', 'error');
-    }
-  };
+      transaction.set(orderRef, newOrder);
+    });
+
+    clearCart();
+    addToast('Pesanan berhasil dibuat!', 'success');
+    return true;
+  } catch (error) {
+    console.error('Failed to create order:', error);
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Gagal membuat pesanan';
+
+    addToast(message || 'Gagal membuat pesanan', 'error');
+    return false;
+  }
+};
 
   const updateOrderStatus = async (id: string, status: Order['status']) => {
     try {

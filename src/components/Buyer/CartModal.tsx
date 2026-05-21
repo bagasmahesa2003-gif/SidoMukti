@@ -14,17 +14,42 @@ export function CartModal({ onClose }: { onClose: () => void }) {
 
   const total = cart.reduce((sum, item) => sum + item.price * item.cartQuantity, 0);
 
-  const handleCheckout = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!buyerName.trim()) return;
-    if (deliveryMethod === 'delivery' && (!phone.trim() || !address.trim())) {
-      return; // Basic validation
-    }
+const handleCheckout = async (e: React.FormEvent) => {
+  e.preventDefault();
 
-    const deliveryDetails = deliveryMethod === 'delivery' ? { phone, address, notes } : undefined;
-    createOrder(buyerName, deliveryMethod, deliveryDetails);
+  if (isSubmitting) return;
+
+  if (!buyerName.trim()) {
+    return;
+  }
+
+  if (deliveryMethod === 'delivery' && (!phone.trim() || !address.trim())) {
+    return;
+  }
+
+  const deliveryDetails =
+    deliveryMethod === 'delivery'
+      ? {
+          phone,
+          address,
+          notes,
+        }
+      : undefined;
+
+  setIsSubmitting(true);
+
+  const success = await createOrder(
+    buyerName,
+    deliveryMethod,
+    deliveryDetails
+  );
+
+  setIsSubmitting(false);
+
+  if (success) {
     onClose();
-  };
+  }
+};
 
   return (
     <>
@@ -189,14 +214,13 @@ export function CartModal({ onClose }: { onClose: () => void }) {
                 <span className="text-brand-600">{formatIDR(total)}</span>
               </div>
 
-              <motion.button
-                whileTap={{ scale: 0.98 }}
-                type="submit"
-                disabled={!buyerName.trim()}
-                className="w-full bg-brand-500 text-white font-bold py-3 rounded-xl shadow-[0_4px_14px_0_rgba(76,175,80,0.39)] mt-2 hover:bg-brand-600 transition-colors disabled:opacity-50"
-              >
-                Pesan Sekarang
-              </motion.button>
+              <button
+  type="submit"
+  disabled={isSubmitting}
+  className="w-full py-3 bg-brand-500 text-white font-bold rounded-xl disabled:opacity-50"
+>
+  {isSubmitting ? 'Memproses...' : 'Pesan Sekarang'}
+</button>
             </div>
           </form>
         )}
