@@ -116,44 +116,58 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   // Cart Actions
-  const addToCart = (product: Product) => {
-    if (product.stock <= 0) {
-      addToast('Stok habis!', 'error');
+const addToCart = (product: Product) => {
+  if (product.stock <= 0) {
+    addToast('Stok habis!', 'error');
+    return;
+  }
+
+  const existing = cart.find((item) => item.id === product.id);
+
+  if (existing) {
+    if (existing.cartQuantity >= product.stock) {
+      addToast('Tidak bisa melebihi stok!', 'error');
       return;
     }
-    setCart((prev) => {
-      const existing = prev.find((item) => item.id === product.id);
-      if (existing) {
-        if (existing.cartQuantity >= product.stock) {
-          addToast('Tidak bisa melebihi stok!', 'error');
-          return prev;
-        }
-        addToast('Jumlah ditambah di keranjang', 'success');
-        return prev.map((item) =>
-          item.id === product.id ? { ...item, cartQuantity: item.cartQuantity + 1 } : item
-        );
-      }
-      addToast('Masuk keranjang!', 'success');
-      return [...prev, { ...product, cartQuantity: 1 }];
-    });
-  };
+
+    setCart(
+      cart.map((item) =>
+        item.id === product.id
+          ? { ...item, cartQuantity: item.cartQuantity + 1 }
+          : item
+      )
+    );
+
+    addToast('Jumlah ditambah di keranjang', 'success');
+    return;
+  }
+
+  setCart([...cart, { ...product, cartQuantity: 1 }]);
+  addToast('Masuk keranjang!', 'success');
+};
 
   const updateCartQty = (id: string, delta: number) => {
-    setCart((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          const newQty = item.cartQuantity + delta;
-          if (newQty > item.stock) {
-            addToast('Maksimal stok tercapai', 'error');
-            return item;
-          }
-          if (newQty < 1) return item; // Handled by remove
-          return { ...item, cartQuantity: newQty };
-        }
-        return item;
-      })
-    );
-  };
+  const item = cart.find((item) => item.id === id);
+
+  if (!item) return;
+
+  const newQty = item.cartQuantity + delta;
+
+  if (newQty > item.stock) {
+    addToast('Maksimal stok tercapai', 'error');
+    return;
+  }
+
+  if (newQty < 1) return;
+
+  setCart(
+    cart.map((item) =>
+      item.id === id
+        ? { ...item, cartQuantity: newQty }
+        : item
+    )
+  );
+};
 
   const removeFromCart = (id: string) => {
     setCart((prev) => prev.filter((item) => item.id !== id));
